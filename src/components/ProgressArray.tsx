@@ -13,6 +13,7 @@ import { timestamp } from "../util/time";
 export default () => {
   const [count, setCount] = useState<number>(0);
   const lastTime = useRef<number>();
+  const [videoDurationLoaded, setVideoDurationLoaded] = useState<number | null>(null);
 
   const { currentId, next, videoDuration, pause, bufferAction } =
     useContext<ProgressContext>(ProgressCtx);
@@ -28,15 +29,59 @@ export default () => {
     setCount(0);
   }, [currentId, stories]);
 
+  // FIX: Pre-load video metadata BEFORE starting the timer
   useEffect(() => {
-    if (!pause) {
+    setVideoDurationLoaded(null);
+    
+    if (stories[currentId]?.type === "video" && stories[currentId]?.url) {
+      // For videos, pre-load the duration before timer starts
+      const loadVideoDuration = () => {
+        const video = document.createElement("video");
+        
+        const onLoadedMetadata = () => {
+          const durationMs = video.duration * 1000;
+          setVideoDurationLoaded(durationMs);
+          cleanup();
+        };
+        
+        const onError = () => {
+          // Fallback to 5 seconds if video fails to load
+          setVideoDurationLoaded(5000);
+          cleanup();
+        };
+        
+        const cleanup = () => {
+          video.removeEventListener("loadedmetadata", onLoadedMetadata);
+          video.removeEventListener("error", onError);
+          video.src = "";
+        };
+        
+        video.addEventListener("loadedmetadata", onLoadedMetadata);
+        video.addEventListener("error", onError);
+        video.crossOrigin = "anonymous";
+        video.src = stories[currentId].url;
+      };
+      
+      loadVideoDuration();
+    }
+  }, [currentId, stories]);
+
+  // FIX: Only start timer after video duration is pre-loaded
+  useEffect(() => {
+    // For images: start timer immediately
+    // For videos: wait until duration is loaded
+    const shouldStartTimer = 
+      stories[currentId]?.type !== "video" || 
+      videoDurationLoaded !== null;
+
+    if (!pause && shouldStartTimer) {
       animationFrameId.current = requestAnimationFrame(incrementCount);
       lastTime.current = timestamp();
     }
     return () => {
       cancelAnimationFrame(animationFrameId.current);
     };
-  }, [currentId, pause]);
+  }, [currentId, pause, videoDurationLoaded]);
 
   let animationFrameId = useRef<number>();
 
@@ -69,8 +114,20 @@ export default () => {
     onStoryEnd && onStoryEnd(currentId, stories[currentId]);
   };
 
+  // FIX: Use pre-loaded video duration instead of the global videoDuration
   const getCurrentInterval = () => {
-    if (stories[currentId].type === "video") return videoDuration;
+    if (stories[currentId].type === "video") {
+      // Use the pre-loaded duration gotten from the video element
+      if (videoDurationLoaded !== null && videoDurationLoaded > 0) {
+        return videoDurationLoaded;
+      }
+      // Fallback to duration property if pre-load failed
+      if (typeof stories[currentId].duration === "number")
+        return stories[currentId].duration;
+      // Final fallback
+      return defaultInterval;
+    }
+    
     if (typeof stories[currentId].duration === "number")
       return stories[currentId].duration;
     return defaultInterval;
