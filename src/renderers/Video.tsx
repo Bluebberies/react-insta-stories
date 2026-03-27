@@ -22,40 +22,15 @@ export const renderer: Renderer = ({
 
   let vid = React.useRef<HTMLVideoElement>(null);
 
-  // CRITICAL: Cleanup on unmount — stops video from playing in background
-  // after swiping away or closing the story viewer
   React.useEffect(() => {
-    const videoEl = vid.current;
-    return () => {
-      if (videoEl) {
-        videoEl.pause();
-        videoEl.currentTime = 0;
-        // Detach src so browser fully releases the media resource
-        // This prevents audio ghost-playing on Capacitor
-        videoEl.removeAttribute("src");
-        videoEl.load();
-      }
-    };
-  }, []);
-
-  // Reset video state when story URL changes (navigating between stories)
-  React.useEffect(() => {
-    setLoaded(false);
     if (vid.current) {
-      vid.current.pause();
-      vid.current.currentTime = 0;
+      if (isPaused) {
+        vid.current.pause();
+      } else {
+        vid.current.play().catch(() => {});
+      }
     }
-  }, [story.url]);
-
-  // Handle pause/play from parent (isPaused prop)
-  React.useEffect(() => {
-    if (!vid.current || !loaded) return;
-    if (isPaused) {
-      vid.current.pause();
-    } else {
-      vid.current.play().catch(() => {});
-    }
-  }, [isPaused, loaded]);
+  }, [isPaused]);
 
   const onWaiting = () => {
     action("pause", true);
@@ -66,11 +41,8 @@ export const renderer: Renderer = ({
   };
 
   const videoLoaded = () => {
-    if (!vid.current) return;
     messageHandler("UPDATE_VIDEO_DURATION", { duration: vid.current.duration });
     setLoaded(true);
-    // Reset to beginning to avoid resuming mid-play when revisiting
-    vid.current.currentTime = 0;
     vid.current
       .play()
       .then(() => {
@@ -78,13 +50,9 @@ export const renderer: Renderer = ({
       })
       .catch(() => {
         setMuted(true);
-        // vid.current?.play().finally(() => {
-        //   action("play");
-        // });
-        vid.current
-          ?.play()
-          .then(() => action("play"))
-          .catch(() => action("play"));
+        vid.current.play().finally(() => {
+          action("play");
+        });
       });
   };
 
@@ -104,10 +72,6 @@ export const renderer: Renderer = ({
             muted={muted}
             autoPlay
             webkit-playsinline="true"
-            // Prevent looping — the progress bar handles advancement
-            loop={false}
-            // Preload metadata so duration is available faster
-            preload="metadata"
           />
           {!loaded && (
             <div
@@ -145,8 +109,6 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    width: "100%",
-    height: "100%",
   },
 };
 
